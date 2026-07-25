@@ -1,0 +1,256 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  /* Instrument-panel radii — sharp, not pill. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  /* Signal-lamp status hues — identical in light & dark for instant recognition. */
+  --color-success: var(--status-passed);
+  /* Queued reads as the amber "standby" signal lamp (matches the card rail). */
+  --color-warning: var(--accent-signal);
+  --color-running: var(--status-running);
+  --color-signal: var(--accent-signal);
+  --color-signal-foreground: var(--accent-signal-foreground);
+  --color-cyan: var(--accent-cyan);
+  --color-status-passed: var(--status-passed);
+  --color-status-failed: var(--status-failed);
+  --color-status-running: var(--status-running);
+  --color-status-queued: var(--status-queued);
+  --color-panel-raised: var(--bg-panel-raised);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── ZeroBug — precision diagnostic instrument. Dark is primary. ─────────────
+   Flat surfaces, 1px hairline borders, no glow/gradient. Status hues are shared
+   across both modes so a card reads the same everywhere. */
+:root {
+  --radius: 6px;
+
+  /* Brand + status hues — identical across dark & light for instant recognition. */
+  --accent-signal: #f5a623; /* amber brand (matches the bug-icon logo) */
+  --accent-signal-foreground: #1a1206;
+  --accent-cyan: #22d3ee; /* secondary accent — running/active, links, focus */
+  --status-passed: #34d399;
+  --status-failed: #fb5c5c;
+  --status-running: #22d3ee; /* running == cyan active */
+  --status-queued: #9096a8;
+}
+
+/* Light mode — warm neutral (not cool blue-grey), same accent/status hues. */
+:root {
+  --bg-panel-raised: #fbfaf8; /* bg-elevated */
+  --background: #f7f5f2; /* bg-base */
+  --foreground: #16171c; /* text-primary */
+  --card: #ffffff; /* bg-surface */
+  --card-foreground: #16171c;
+  --popover: #fbfaf8;
+  --popover-foreground: #16171c;
+  --primary: #f5a623;
+  --primary-foreground: #1a1206;
+  --secondary: #efece7;
+  --secondary-foreground: #16171c;
+  --muted: #efece7;
+  --muted-foreground: #6b6f7e; /* text-muted */
+  --accent: #efece7;
+  --accent-foreground: #16171c;
+  --destructive: #fb5c5c;
+  --destructive-foreground: #ffffff;
+  --border: #e3e0da; /* border-hairline */
+  --input: #e3e0da;
+  --ring: #22d3ee;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #16171c;
+  --sidebar-border: #e3e0da;
+}
+
+.dark {
+  /* Obsidian with a faint violet undertone — the flagship theme. */
+  --bg-panel-raised: #1d2029; /* bg-elevated: chat panel, modals, hover */
+  --background: #0a0b10; /* bg-base: obsidian */
+  --foreground: #f5f6fa; /* text-primary */
+  --card: #14161d; /* bg-surface: columns, cards */
+  --card-foreground: #f5f6fa;
+  --popover: #1d2029;
+  --popover-foreground: #f5f6fa;
+  --primary: #f5a623;
+  --primary-foreground: #1a1206;
+  --secondary: #1d2029;
+  --secondary-foreground: #f5f6fa;
+  --muted: #1d2029;
+  --muted-foreground: #9096a8; /* text-muted */
+  --accent: #1d2029;
+  --accent-foreground: #f5f6fa;
+  --destructive: #fb5c5c;
+  --destructive-foreground: #1a0a0a;
+  --border: #2b2f3a; /* border-hairline */
+  --input: #2b2f3a;
+  --ring: #22d3ee;
+  --sidebar: #0a0b10;
+  --sidebar-foreground: #f5f6fa;
+  --sidebar-border: #2b2f3a;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--accent-signal) 50%, var(--color-border)) transparent;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Thin, amber-tinted scrollbars. */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--accent-signal) 45%, transparent);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--accent-signal) 75%, transparent);
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href] {
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .input {
+    @apply h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none transition focus:border-ring focus:ring-1 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
+
+/* ── Crisp press feedback — replaces all ripple/diffuse effects. ─────────────
+   A 120ms scale-to-0.98 + opacity dip. Applied globally to buttons and any
+   [data-press] element. No spreading ink, no glow. */
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active,
+  [data-press]:active {
+    transform: scale(0.98);
+    opacity: 0.9;
+    transition:
+      transform 120ms cubic-bezier(0.2, 0, 0, 1),
+      opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+  }
+}
+
+/* ── Signal-lamp status rail ─────────────────────────────────────────────────
+   The signature element: a 3px solid left edge in the status color on a flat
+   panel. Use `.rail-<status>` on a bordered --bg-panel surface. */
+.status-rail {
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+.rail-queued { border-left-color: var(--accent-signal); }
+.rail-running { border-left-color: var(--color-status-running); }
+.rail-passed { border-left-color: var(--color-status-passed); }
+.rail-failed { border-left-color: var(--color-status-failed); }
+
+/* ── Running status dot — slow linear opacity breathe, no glow blur. ───────── */
+@keyframes status-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@utility breathe {
+  animation: status-breathe 2s linear infinite;
+}
+
+/* ── Utility keyframes (kept; flat, no glow) ────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@utility animate-fade-in { animation: fade-in 0.14s ease-out; }
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@utility animate-scale-in { animation: scale-in 0.12s ease-out; }
+
+/* Drag-target / drop-zone — dashed hairline, no fill glow. */
+@utility drop-target-active {
+  border-color: var(--color-signal);
+  background: color-mix(in oklab, var(--color-signal) 6%, transparent);
+}
+
+@utility scrollbar-thin {
+  scrollbar-color: color-mix(in oklab, var(--accent-signal) 50%, var(--color-border)) transparent;
+  &::-webkit-scrollbar { width: 8px; height: 8px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--accent-signal) 50%, transparent);
+    border-radius: 999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--accent-signal) 80%, transparent);
+  }
+}
+
+/* Fully hidden scrollbar (still scrollable) — e.g. the chat input textarea */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { width: 0; height: 0; display: none; }
+}

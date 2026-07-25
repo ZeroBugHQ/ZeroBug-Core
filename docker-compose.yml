@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ZeroBug Core — self-host stack (frontend + backend + MongoDB)
+#
+# QUICKSTART:
+#   1. cp .env.example .env
+#   2. Set ZEROBUG_SECRETS_KEY in .env  (generate: openssl rand -base64 32)
+#      — the backend refuses to start without it.
+#      Optionally set MODEL_PROVIDER + your BYOK key (e.g. ANTHROPIC_API_KEY).
+#   3. docker compose up --build
+#
+#   Frontend → http://localhost:8080      Backend/API → http://localhost:4000
+#   MongoDB is NOT published to the host (internal network only).
+#
+# Data survives `docker compose down` (named volumes below). To wipe all data,
+# use `docker compose down -v`.
+#
+# NOTE: VITE_API_URL is baked into the frontend at build time and must be the
+# browser-reachable backend URL. It defaults to http://localhost:4000; override
+# by exporting VITE_API_URL before `docker compose up --build` if your backend is
+# published elsewhere.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - zerobug-mongo:/data/db
+    # Intentionally NOT published to the host — reachable only on the compose network.
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    # All tunables come from .env; the values below override it for the container
+    # network (service DNS, in-container paths, bind host).
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4000"
+      MONGODB_URI: mongodb://mongo:27017
+      ARTIFACTS_DIR: /app/artifacts
+      DATA_DIR: /app/.data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    volumes:
+      - zerobug-artifacts:/app/artifacts
+      - zerobug-data:/app/.data
+    healthcheck:
+      # Node 20 has a global fetch(); /api/health returns 200 when the app is up.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  zerobug-mongo:
+  zerobug-artifacts:
+  zerobug-data:

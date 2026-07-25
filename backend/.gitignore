@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.log
+
+# Runtime data (saved auth sessions) and generated run artifacts — never commit.
+.data/
+artifacts/

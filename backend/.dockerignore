@@ -1,0 +1,9 @@
+node_modules
+.data
+artifacts
+.env
+*.log
+npm-debug.log*
+Dockerfile
+.dockerignore
+_*.mjs

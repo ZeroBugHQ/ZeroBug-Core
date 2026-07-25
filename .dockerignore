@@ -1,0 +1,13 @@
+# Frontend build context (apps/core). Exclude the backend and all runtime/build
+# output so it doesn't bloat or leak into the frontend image.
+node_modules
+backend
+dist
+.output
+.tanstack
+.nitro
+.env
+*.log
+Dockerfile
+.dockerignore
+docs
