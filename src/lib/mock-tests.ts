@@ -1,4 +1,4 @@
-export type TestStatus = "queued" | "running" | "passed" | "failed";
+export type TestStatus = "queued" | "running" | "passed" | "failed" | "blocked";
 
 export type AssertionType = "functional" | "visual" | "a11y";
 export type TestMode = "ui" | "api";

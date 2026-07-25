@@ -21,17 +21,20 @@ function depsState(test, passedCodes, failedCodes, knownCodes) {
   return waiting ? "wait" : "ready";
 }
 
-// Mark a test as blocked (skipped) because a dependency hasn't passed.
+// Mark a test as "blocked" because a dependency didn't pass. The test never ran,
+// so it's excluded from pass-rate math (see stats-service). It shares the "failed"
+// board column (no separate Blocked column) but carries a distinct status so the
+// UI can render it apart from a real failure.
 async function markBlocked(projectId, test, reason, publish) {
   const col = await systemColumn(projectId, "failed");
   await Test.findByIdAndUpdate(test._id, {
-    status: "failed",
+    status: "blocked",
     failureReason: reason,
     ...(col ? { columnId: col._id } : {}),
     $unset: { durationMs: "" },
   });
-  publish(projectId, test._id, { type: "status", status: "failed" });
-  publish(projectId, test._id, { type: "result", status: "failed", failureReason: reason });
+  publish(projectId, test._id, { type: "status", status: "blocked" });
+  publish(projectId, test._id, { type: "result", status: "blocked", failureReason: reason });
 }
 
 const projectQueues = new Map();

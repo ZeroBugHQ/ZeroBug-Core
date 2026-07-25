@@ -55,7 +55,10 @@ const testSchema = new Schema(
     apiConfig: { type: apiConfigSchema, default: undefined },
     status: {
       type: String,
-      enum: ["queued", "running", "passed", "failed"],
+      // "blocked": a dependency didn't pass, so this test was not run this batch.
+      // Distinct from "failed" (which means the test ran and its assertions failed)
+      // and excluded from pass-rate math.
+      enum: ["queued", "running", "passed", "failed", "blocked"],
       default: "queued",
     },
     durationMs: { type: Number, default: undefined },

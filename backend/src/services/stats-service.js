@@ -5,7 +5,7 @@ import { config } from "../config.js";
 import { listModels, resolveAvailableModel } from "./ollama.js";
 
 export function computeOutcomes(tests) {
-  const counts = { queued: 0, running: 0, passed: 0, failed: 0 };
+  const counts = { queued: 0, running: 0, passed: 0, failed: 0, blocked: 0 };
   let durSum = 0;
   let durCount = 0;
   for (const t of tests) {
@@ -15,6 +15,8 @@ export function computeOutcomes(tests) {
       durCount += 1;
     }
   }
+  // "blocked" tests never ran (a dependency didn't pass), so they're deliberately
+  // excluded from `finished` — they count as neither a pass nor a fail in the rate.
   const finished = counts.passed + counts.failed;
   return {
     ...counts,

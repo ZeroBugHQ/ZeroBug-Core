@@ -81,6 +81,7 @@ async function buildQueueSummary(projectId, source, startedAt, completedTestIds 
       running: tests.filter((t) => t.status === "running").length,
       passed: tests.filter((t) => t.status === "passed").length,
       failed: tests.filter((t) => t.status === "failed").length,
+      blocked: tests.filter((t) => t.status === "blocked").length,
     },
     finished: finished.map((t) => ({
       id: String(t._id),
@@ -210,6 +211,7 @@ export async function runQueue({
 
   const completedTestIds = [];
   let failed = 0;
+  let blocked = 0;
   let stopped = false;
   let lastError = null;
 
@@ -244,13 +246,13 @@ export async function runQueue({
         );
         const col = await systemColumn(projectId, "failed");
         await Test.findByIdAndUpdate(nextId, {
-          status: "failed",
+          status: "blocked",
           failureReason: `Blocked: depends on ${unmet.join(", ")} (not passed)`,
           ...(col ? { columnId: col._id } : {}),
           $unset: { durationMs: "" },
         });
-        onEvent({ type: "result", testId: nextId, status: "failed" });
-        failed += 1;
+        onEvent({ type: "result", testId: nextId, status: "blocked" });
+        blocked += 1;
         completedTestIds.push(nextId);
         continue;
       }
@@ -314,6 +316,7 @@ export async function runQueue({
       total: queued.length,
       completed: completedTestIds.length,
       failed,
+      blocked,
       stopped,
       error: lastError?.message,
     });

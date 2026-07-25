@@ -24,6 +24,35 @@ test("computeOutcomes tallies statuses, pass rate and avg duration", () => {
   assert.equal(o.avgDurationMs, 4333);
 });
 
+test("computeOutcomes excludes blocked tests from the pass rate", () => {
+  // 2 passed, 1 failed, 3 blocked. Blocked never ran, so pass rate must be
+  // computed over passed+failed only (2/3 = 67), NOT counted as pass or fail.
+  const withBlocked = [
+    { code: "B-1", status: "passed", durationMs: 2000 },
+    { code: "B-2", status: "passed", durationMs: 2000 },
+    { code: "B-3", status: "failed", durationMs: 2000 },
+    { code: "B-4", status: "blocked" },
+    { code: "B-5", status: "blocked" },
+    { code: "B-6", status: "blocked" },
+  ];
+  const o = computeOutcomes(withBlocked);
+  assert.equal(o.passed, 2);
+  assert.equal(o.failed, 1);
+  assert.equal(o.blocked, 3, "blocked tallied separately");
+  assert.equal(o.total, 6);
+  // If blocked leaked into the denominator, this would be 2/6=33 (or 2/4=50).
+  assert.equal(o.passRate, 67, "blocked excluded from pass-rate denominator");
+});
+
+test("computeOutcomes: an all-blocked board has a 0% pass rate, not NaN", () => {
+  const o = computeOutcomes([
+    { code: "C-1", status: "blocked" },
+    { code: "C-2", status: "blocked" },
+  ]);
+  assert.equal(o.blocked, 2);
+  assert.equal(o.passRate, 0, "no finished tests → 0, not NaN");
+});
+
 test("computeOutcomes handles an empty board without dividing by zero", () => {
   const o = computeOutcomes([]);
   assert.equal(o.total, 0);

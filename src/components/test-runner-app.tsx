@@ -6,6 +6,7 @@ import { CounterValue, RunningPulse, SPRING_HOVER, useReduced, useToast } from "
 import {
   AlertTriangle,
   ArrowDownWideNarrow,
+  Ban,
   ArrowUpNarrowWide,
   Bot,
   CalendarClock,
@@ -510,12 +511,23 @@ export function TestRunnerApp() {
     });
 
   const systemColId = useCallback(
-    (key: ColumnSystemKey) => columns.find((c) => c.systemKey === key)?.id,
+    (key: ColumnSystemKey | TestStatus) => {
+      // Blocked tests never ran; they live in the Failed column (no dedicated
+      // Blocked column) but keep their distinct "blocked" status for styling.
+      const colKey = key === "blocked" ? "failed" : key;
+      return columns.find((c) => c.systemKey === colKey)?.id;
+    },
     [columns],
   );
 
   const counts = useMemo(() => {
-    const c: Record<TestStatus, number> = { queued: 0, running: 0, passed: 0, failed: 0 };
+    const c: Record<TestStatus, number> = {
+      queued: 0,
+      running: 0,
+      passed: 0,
+      failed: 0,
+      blocked: 0,
+    };
     for (const t of tests) c[t.status]++;
     return c;
   }, [tests]);
@@ -775,12 +787,14 @@ export function TestRunnerApp() {
           });
           qc.invalidateQueries({ queryKey: ["run", ev.testId] });
           if (testCode) {
+            const blocked = ev.status === "blocked";
             pushMsg({
               role: "agent",
               kind: ev.status === "passed" ? "result-pass" : "result-fail",
               testCode,
-              content:
-                ev.status === "passed"
+              content: blocked
+                ? `⊘ **${testCode}** blocked — ${ev.failureReason ?? "a dependency did not pass"}`
+                : ev.status === "passed"
                   ? `✓ **${testCode}** passed in ${((ev.durationMs ?? 0) / 1000).toFixed(2)}s on attempt ${ev.attempt ?? 1}/${ev.maxAttempts ?? 1}.`
                   : `✗ **${testCode}** failed after ${((ev.durationMs ?? 0) / 1000).toFixed(2)}s on attempt ${ev.attempt ?? 1}/${ev.maxAttempts ?? 1}.\n\n\`${ev.failureReason ?? "Unknown error"}\``,
             });
@@ -2860,7 +2874,10 @@ function TestCard({
   const stale = status === "running" && !active && !batchRunning;
   const isPassed = status === "passed";
   const isFailed = status === "failed";
+  const isBlocked = status === "blocked";
   const isQueued = status === "queued";
+  // Blocked tests never ran, so there's no Run to fetch — but they do carry a
+  // failureReason ("Blocked: depends on …"), shown via the reason strip below.
   const hasRun = isPassed || isFailed;
 
   const [showResults, setShowResults] = useState(false);
@@ -2892,7 +2909,9 @@ function TestCard({
             ? "rail-passed"
             : isFailed
               ? "rail-failed"
-              : "rail-queued",
+              : isBlocked
+                ? "rail-blocked"
+                : "rail-queued",
         !isRunning && "cursor-grab active:cursor-grabbing",
         "hover:border-muted-foreground/40",
         // Drag lift: border-color shift + 2px translateY, no shadow blur.
@@ -2914,6 +2933,13 @@ function TestCard({
         <div className="mb-1.5 flex items-center gap-1 text-[10px] font-medium text-warning">
           <AlertTriangle className="h-3 w-3 shrink-0" />
           Interrupted — re-run to recover
+        </div>
+      )}
+
+      {isBlocked && (
+        <div className="mb-1.5 flex items-center gap-1 text-[10px] font-medium text-warning">
+          <Ban className="h-3 w-3 shrink-0" />
+          Blocked — a dependency didn’t pass
         </div>
       )}
 
@@ -3530,6 +3556,7 @@ const STATUS_DOT: Record<TestStatus, string> = {
   running: "bg-running",
   passed: "bg-success",
   failed: "bg-destructive",
+  blocked: "bg-warning",
 };
 
 // ⌘K command palette: fuzzy-search tests + quick actions, keyboard-driven.

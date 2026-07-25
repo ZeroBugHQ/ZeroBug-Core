@@ -207,6 +207,10 @@
 .rail-running { border-left-color: var(--color-status-running); }
 .rail-passed { border-left-color: var(--color-status-passed); }
 .rail-failed { border-left-color: var(--color-status-failed); }
+/* Blocked (dependency didn't pass, never ran): a neutral slate rail so it reads
+   as "not run" rather than an error — distinct from the red failed rail even
+   though blocked cards share the Failed column. */
+.rail-blocked { border-left-color: var(--color-status-queued); }
 
 /* ── Running status dot — slow linear opacity breathe, no glow blur. ───────── */
 @keyframes status-breathe {
