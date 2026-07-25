@@ -467,25 +467,123 @@ async function runPostAssertions({ page, test, artifactScope, steps, onEvent, st
   return { artifacts, failureReason, nextIndex: index };
 }
 
-// Let a SPA settle after a navigation/click that changes the view: wait for the
-// network to go idle, then for common loading indicators (spinners/skeletons/
-// aria-busy) to disappear, so the agent observes a stable page — not a
-// half-rendered one it would misread and act on.
-async function settle(page) {
-  await page.waitForLoadState("domcontentloaded", { timeout: 4000 }).catch(() => {});
-  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-  await page
-    .waitForFunction(
-      () => {
-        const loaders = document.querySelectorAll(
-          '[aria-busy="true"], [role="progressbar"], .spinner, .loading, .loader, [class*="skeleton"], [class*="Skeleton"]',
-        );
-        return Array.from(loaders).every((el) => !el.getClientRects().length);
-      },
-      { timeout: 2500 },
+// How long the DOM must show no mutations before we call it "quiescent".
+const SETTLE_QUIET_MS = 400;
+// Bounded, non-fatal sub-waits (network + loaders). These never block the
+// observe step on their own — a polling/websocket app that never goes idle
+// still proceeds as soon as the DOM is quiescent.
+const SETTLE_NETWORKIDLE_MS = 1500;
+const SETTLE_LOADERS_MS = 1500;
+const SETTLE_TAIL_MS = 150;
+
+// Wait for the DOM to stop mutating for `quietMs`, or resolve at `ceilingMs`.
+// Returns "quiescent" | "ceiling" | "error". Installs a MutationObserver and
+// resets a debounce timer on every mutation batch — the real "page has
+// stabilized" signal, unlike a blind networkidle that never fires on
+// polling/websocket apps.
+async function domQuiescence(page, quietMs, ceilingMs) {
+  return page
+    .evaluate(
+      ({ quietMs, ceilingMs }) =>
+        new Promise((resolve) => {
+          let quietTimer;
+          const done = (reason) => {
+            try {
+              obs.disconnect();
+            } catch {}
+            clearTimeout(quietTimer);
+            clearTimeout(hardTimer);
+            resolve(reason);
+          };
+          const bump = () => {
+            clearTimeout(quietTimer);
+            quietTimer = setTimeout(() => done("quiescent"), quietMs);
+          };
+          const obs = new MutationObserver(bump);
+          const hardTimer = setTimeout(() => done("ceiling"), ceilingMs);
+          obs.observe(document, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true,
+          });
+          bump(); // start the quiet clock immediately for an already-still page
+        }),
+      { quietMs, ceilingMs },
     )
-    .catch(() => {});
-  await page.waitForTimeout(300);
+    .catch(() => "error");
+}
+
+// Pure orchestrator (browser-free, unit-testable). `signals` are injected async
+// fns each receiving the remaining budget (ms); `now`/`sleep` are injectable for
+// deterministic tests. Guarantees: it never runs longer than opts.maxMs (bar the
+// separate, deliberately-small tailMs); the primary quiescence signal always
+// runs; and the secondary (network/loaders) waits are best-effort — their
+// rejection or timeout never prevents proceeding once the DOM is stable.
+export async function settleLoop(signals, opts) {
+  const { maxMs, tailMs = 0, now = () => Date.now(), sleep } = opts;
+  const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const start = now();
+  const remaining = () => Math.max(0, maxMs - (now() - start));
+
+  // A caller-supplied pre-wait (e.g. domcontentloaded) that consumes the SAME
+  // budget, so it can't push total time past maxMs.
+  if (signals.prewait) {
+    const budget = remaining();
+    if (budget > 0) await Promise.resolve(signals.prewait(budget)).catch(() => {});
+  }
+
+  // Primary: DOM quiescence, bounded by whatever budget is left.
+  if (signals.quiescence) {
+    const budget = remaining();
+    if (budget > 0) await Promise.resolve(signals.quiescence(budget)).catch(() => {});
+  }
+
+  // Secondary (best-effort, non-fatal): only if budget remains. Each signal is
+  // handed the remaining budget and is itself responsible for not exceeding it
+  // (the real Playwright waiters cap their own timeout at Math.min(budget, …)),
+  // so running them concurrently can't push past the ceiling. Failures/timeouts
+  // are swallowed — they never block proceeding once the DOM is stable.
+  const budget = remaining();
+  if (budget > 0 && (signals.networkIdle || signals.loadersGone)) {
+    const best = [];
+    if (signals.networkIdle)
+      best.push(Promise.resolve(signals.networkIdle(budget)).catch(() => {}));
+    if (signals.loadersGone)
+      best.push(Promise.resolve(signals.loadersGone(budget)).catch(() => {}));
+    await Promise.all(best);
+  }
+
+  if (tailMs > 0) await wait(tailMs);
+  return { elapsedMs: now() - start };
+}
+
+// Let a SPA settle after a navigation/click before the agent observes: wait for
+// the DOM to go quiescent (primary), with bounded best-effort network/loader
+// checks, all sharing one hard ceiling (config.settleMaxMs) so a page that never
+// stabilizes can't hang the run. domcontentloaded consumes part of the same
+// budget, so total wait never exceeds settleMaxMs (bar the small tail delay).
+async function settle(page) {
+  await settleLoop(
+    {
+      prewait: (budget) =>
+        page.waitForLoadState("domcontentloaded", { timeout: Math.min(budget, 4000) }),
+      quiescence: (budget) => domQuiescence(page, SETTLE_QUIET_MS, budget),
+      networkIdle: (budget) =>
+        page.waitForLoadState("networkidle", { timeout: Math.min(budget, SETTLE_NETWORKIDLE_MS) }),
+      loadersGone: (budget) =>
+        page.waitForFunction(
+          () => {
+            const loaders = document.querySelectorAll(
+              '[aria-busy="true"], [role="progressbar"], .spinner, .loading, .loader, [class*="skeleton"], [class*="Skeleton"]',
+            );
+            return Array.from(loaders).every((el) => !el.getClientRects().length);
+          },
+          { timeout: Math.min(budget, SETTLE_LOADERS_MS) },
+        ),
+    },
+    { maxMs: config.settleMaxMs, tailMs: SETTLE_TAIL_MS },
+  );
 }
 
 // Click the first visible element matching a piece of text/label — a robust

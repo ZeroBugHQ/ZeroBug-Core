@@ -60,6 +60,12 @@ export const config = {
   playwrightTimeoutMs: int(process.env.PLAYWRIGHT_TIMEOUT_MS, 30000),
   // Navigation (page.goto) can be much slower than element actions on heavy/slow sites.
   playwrightNavTimeoutMs: int(process.env.PLAYWRIGHT_NAV_TIMEOUT_MS, 60000),
+  // Hard ceiling (ms) for the post-action "settle" wait before the agent observes
+  // the page. Adaptive: resolves as soon as the DOM goes quiescent; this only
+  // bounds a page that never stabilizes (infinite spinner, endless polling). The
+  // whole settle (domcontentloaded + quiescence + network/loader checks) shares
+  // this single budget, so total wait never exceeds it (bar a small tail delay).
+  settleMaxMs: int(process.env.SETTLE_MAX_MS, 8000),
 
   artifactsDir: process.env.ARTIFACTS_DIR || path.join(ROOT_DIR, "artifacts"),
   // Private (NOT publicly served) dir for secrets-adjacent files like saved
