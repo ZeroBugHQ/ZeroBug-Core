@@ -1,99 +1,13 @@
+// Automation / CI / webhook / schedule entry point. Since the runner unification
+// (Q6), this is a THIN WRAPPER over the single canonical batch engine in
+// background-runner.js (runProjectBatch). It keeps the queue-management API the
+// automation routes depend on -- status, pause/resume, stop, cancel/clear/reorder
+// -- all operating on the shared queue-state so they see the same in-flight run
+// the interactive "Run all" uses.
 import { Test } from "../models/test.model.js";
 import { Project } from "../models/project.model.js";
-import { executeTestRun } from "./run-service.js";
-import { systemColumn } from "./project-service.js";
-import { orderByDependencies, dependenciesMet } from "./queue-deps.js";
-import { evaluateProjectAlerts } from "./alert-service.js";
-
-const PRIORITY_WEIGHT = { critical: 0, high: 1, medium: 2, low: 3 };
-const stateByProject = new Map();
-
-function queueState(projectId) {
-  const key = String(projectId);
-  let state = stateByProject.get(key);
-  if (!state) {
-    state = {
-      running: false,
-      pendingTestIds: [],
-      activeTestId: null,
-      stopRequested: false,
-      abortController: null,
-      lastSource: null,
-      lastStartedAt: null,
-      lastFinishedAt: null,
-      lastSummary: null,
-    };
-    stateByProject.set(key, state);
-  }
-  return state;
-}
-
-function sortQueueTests(tests) {
-  return [...tests].sort((a, b) => {
-    const orderDiff = (a.queueOrder ?? 0) - (b.queueOrder ?? 0);
-    if (orderDiff !== 0) return orderDiff;
-    const priorityDiff = (PRIORITY_WEIGHT[a.priority] ?? 9) - (PRIORITY_WEIGHT[b.priority] ?? 9);
-    if (priorityDiff !== 0) return priorityDiff;
-    return String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? ""));
-  });
-}
-
-async function currentProjectQueuePaused(projectId) {
-  const project = await Project.findById(projectId).select("queuePaused").lean();
-  return !!project?.queuePaused;
-}
-
-async function waitForUnpause(projectId, state) {
-  while (await currentProjectQueuePaused(projectId)) {
-    if (state.stopRequested) return false;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return true;
-}
-
-async function postCallback(callbackUrl, payload) {
-  if (!callbackUrl) return;
-  try {
-    await fetch(callbackUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  } catch (err) {
-    console.error("[queue] callback failed:", err.message);
-  }
-}
-
-async function buildQueueSummary(projectId, source, startedAt, completedTestIds = []) {
-  const [project, tests] = await Promise.all([
-    Project.findById(projectId).select("name webhookCallbackUrl").lean(),
-    Test.find({ projectId }).sort({ queueOrder: 1, createdAt: 1 }).lean(),
-  ]);
-  const finished = tests.filter((t) => completedTestIds.includes(String(t._id)));
-  return {
-    projectId: String(projectId),
-    projectName: project?.name ?? "Project",
-    source,
-    startedAt,
-    finishedAt: new Date().toISOString(),
-    totals: {
-      queued: tests.filter((t) => t.status === "queued").length,
-      running: tests.filter((t) => t.status === "running").length,
-      passed: tests.filter((t) => t.status === "passed").length,
-      failed: tests.filter((t) => t.status === "failed").length,
-      blocked: tests.filter((t) => t.status === "blocked").length,
-    },
-    finished: finished.map((t) => ({
-      id: String(t._id),
-      code: t.code,
-      title: t.title,
-      status: t.status,
-      durationMs: t.durationMs,
-      failureReason: t.failureReason,
-      attempts: t.lastRunAttempts ?? 1,
-    })),
-  };
-}
+import { queueState } from "./queue-state.js";
+import { runProjectBatch, buildQueueSummary } from "./background-runner.js";
 
 export async function getQueueState(projectId) {
   const project = await Project.findById(projectId).select("queuePaused").lean();
@@ -122,6 +36,9 @@ export async function setQueuePaused(projectId, paused) {
   return getQueueState(projectId);
 }
 
+// Remove a not-yet-dispatched test from the live queue. Because the scheduler
+// re-reads state.pendingTestIds each cycle, this takes effect on the next
+// dispatch even mid-run under concurrency.
 export async function cancelQueuedTest(projectId, testId) {
   const state = queueState(projectId);
   const before = state.pendingTestIds.length;
@@ -140,7 +57,7 @@ export async function stopQueue(projectId) {
   const state = queueState(projectId);
   state.stopRequested = true;
   state.pendingTestIds = [];
-  state.abortController?.abort();
+  state.controller?.abort();
   return { ok: true };
 }
 
@@ -156,6 +73,8 @@ export async function reorderQueue(projectId, orderedIds) {
     finalIds.map((id, index) => Test.findByIdAndUpdate(id, { queueOrder: index + 1 })),
   );
 
+  // If a batch is in flight, reorder the LIVE pending list too (minus whatever is
+  // already active/dispatched) so the new order is honored on the next cycle.
   const state = queueState(projectId);
   if (state.running) {
     const activeId = state.activeTestId;
@@ -167,6 +86,12 @@ export async function reorderQueue(projectId, orderedIds) {
   return { ok: true };
 }
 
+/**
+ * Automation/CI/webhook/schedule batch run. Delegates to the unified engine with
+ * automation-flavored options: honor pause, build a summary, fire the webhook
+ * callback, and forward events to the caller's onEvent sink (in addition to the
+ * SSE bus). Preserves the QUEUE_RUNNING coded error for callers.
+ */
 export async function runQueue({
   projectId,
   environmentId,
@@ -175,153 +100,34 @@ export async function runQueue({
   maxRetries,
   callbackUrl,
   onEvent = () => {},
+  runTest, // testing seam; omitted in production -> real executor
 }) {
-  const state = queueState(projectId);
-  if (state.running) {
-    const err = new Error("Queue is already running for this project.");
-    err.code = "QUEUE_RUNNING";
-    throw err;
-  }
-
   const project = await Project.findById(projectId).select("name webhookCallbackUrl").lean();
   if (!project) throw new Error("Project not found");
 
-  const queued = orderByDependencies(
-    sortQueueTests(
-      await Test.find({
-        projectId,
-        status: "queued",
-        ...(suite ? { suite } : {}),
-      }).lean(),
-    ),
-  );
-  const testById = new Map(queued.map((t) => [t.id ?? String(t._id), t]));
-  const knownCodes = new Set(queued.map((t) => t.code));
-  const passedCodes = new Set();
-
-  state.running = true;
-  state.stopRequested = false;
-  state.activeTestId = null;
-  state.pendingTestIds = queued.map((t) => t.id ?? String(t._id));
-  state.abortController = new AbortController();
-  state.lastSource = source;
-  state.lastStartedAt = new Date().toISOString();
-  state.lastFinishedAt = null;
-  state.lastSummary = null;
-
-  const completedTestIds = [];
-  let failed = 0;
-  let blocked = 0;
-  let stopped = false;
-  let lastError = null;
-
-  onEvent({
-    type: "queue_started",
-    projectId: String(projectId),
-    total: queued.length,
-    suite: suite || null,
-    source,
-  });
-
   try {
-    while (state.pendingTestIds.length > 0) {
-      if (state.stopRequested) {
-        stopped = true;
-        break;
-      }
-      const canContinue = await waitForUnpause(projectId, state);
-      if (!canContinue) {
-        stopped = true;
-        break;
-      }
-
-      const nextId = state.pendingTestIds.shift();
-      if (!nextId) continue;
-
-      // Skip tests whose dependencies haven't passed in this run.
-      const queuedTest = testById.get(nextId);
-      if (queuedTest && !dependenciesMet(queuedTest, passedCodes, knownCodes)) {
-        const unmet = (queuedTest.dependsOn || []).filter(
-          (c) => knownCodes.has(c) && !passedCodes.has(c),
-        );
-        const col = await systemColumn(projectId, "failed");
-        await Test.findByIdAndUpdate(nextId, {
-          status: "blocked",
-          failureReason: `Blocked: depends on ${unmet.join(", ")} (not passed)`,
-          ...(col ? { columnId: col._id } : {}),
-          $unset: { durationMs: "" },
-        });
-        onEvent({ type: "result", testId: nextId, status: "blocked" });
-        blocked += 1;
-        completedTestIds.push(nextId);
-        continue;
-      }
-
-      state.activeTestId = nextId;
-
-      onEvent({
-        type: "queue_progress",
-        projectId: String(projectId),
-        activeTestId: nextId,
-        pendingCount: state.pendingTestIds.length,
-      });
-
-      const runResult = await executeTestRun({
-        testId: nextId,
-        environmentId,
-        maxRetries,
-        source,
-        signal: state.abortController.signal,
-        onEvent,
-      }).catch((err) => {
-        lastError = err;
-        throw err;
-      });
-
-      if (runResult?.result?.status === "passed" && queuedTest) {
-        passedCodes.add(queuedTest.code);
-      }
-      completedTestIds.push(nextId);
-      if (runResult.result.status === "failed") failed += 1;
-      if (
-        state.abortController.signal.aborted &&
-        runResult.result.failureReason === "Cancelled by user."
-      ) {
-        stopped = true;
-        break;
-      }
-    }
-  } catch (err) {
-    lastError = err;
-    onEvent({ type: "error", message: err.message });
-  } finally {
-    state.running = false;
-    state.activeTestId = null;
-    state.abortController = null;
-    state.stopRequested = false;
-    state.pendingTestIds = [];
-    const summary = await buildQueueSummary(
+    return await runProjectBatch({
       projectId,
+      environmentId,
+      suite,
       source,
-      state.lastStartedAt,
-      completedTestIds,
-    );
-    summary.stopped = stopped;
-    summary.error = lastError?.message || null;
-    state.lastFinishedAt = new Date().toISOString();
-    state.lastSummary = summary;
-    onEvent({
-      type: "queue_complete",
-      projectId: String(projectId),
-      total: queued.length,
-      completed: completedTestIds.length,
-      failed,
-      blocked,
-      stopped,
-      error: lastError?.message,
+      maxRetries,
+      pause: true,
+      callbackUrl: callbackUrl || project.webhookCallbackUrl,
+      buildSummary: true,
+      onEvent,
+      ...(runTest ? { runTest } : {}),
     });
-    await postCallback(callbackUrl || project.webhookCallbackUrl, summary);
-    await evaluateProjectAlerts(projectId, completedTestIds);
-    return summary;
+  } catch (err) {
+    // An empty queue is a no-op for automation (a scheduled run with nothing
+    // queued shouldn't error) -- return an empty summary, matching prior
+    // behavior. Any other error (incl. QUEUE_RUNNING) propagates unchanged.
+    if (err.message === "No queued tests to run.") {
+      const summary = await buildQueueSummary(projectId, source, new Date().toISOString(), []);
+      summary.stopped = false;
+      onEvent({ type: "queue_complete", projectId: String(projectId), total: 0, stopped: false });
+      return summary;
+    }
+    throw err;
   }
 }

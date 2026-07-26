@@ -30,6 +30,9 @@ const runSchema = new Schema(
       default: "running",
     },
     mode: { type: String, enum: ["ui", "api"], default: "ui" },
+    // Where this run originated, for audit/insights. "interactive" = a UI Run;
+    // "queue"/"schedule"/a webhook-supplied value = an automation run.
+    source: { type: String, default: undefined },
     assertionTypes: { type: [String], default: [] },
     attempt: { type: Number, default: 1 },
     maxAttempts: { type: Number, default: 1 },

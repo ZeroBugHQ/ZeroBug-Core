@@ -98,13 +98,15 @@ export async function executeTestRun({
   onEvent = () => {},
   signal,
   pooled = false,
+  source,
+  maxRetries,
 }) {
   const test = await Test.findById(testId);
   if (!test) throw new Error("Test not found");
 
   // Data-driven UI tests run the agent once per row (own isolated path).
   if (test.mode !== "api" && Array.isArray(test.dataRows) && test.dataRows.length > 0) {
-    return executeDataDrivenRun({ test, environmentId, onEvent, signal });
+    return executeDataDrivenRun({ test, environmentId, onEvent, signal, source });
   }
 
   const [environment, previousRun, { model }, project] = await Promise.all([
@@ -130,7 +132,10 @@ export async function executeTestRun({
   ]);
   if (test.mode !== "api" && envId) await ensureSessionDir().catch(() => {});
 
-  const maxAttempts = Math.max(1, Number(test.maxRetries ?? 0) + 1);
+  // An optional per-run override (automation/CI) wins over the per-test retry
+  // budget; when omitted (the UI path), fall back to the test's own setting.
+  const retryBudget = maxRetries != null ? maxRetries : test.maxRetries;
+  const maxAttempts = Math.max(1, Number(retryBudget ?? 0) + 1);
 
   test.status = "running";
   test.durationMs = undefined;
@@ -142,6 +147,7 @@ export async function executeTestRun({
     testId: test._id,
     status: "running",
     mode: test.mode || "ui",
+    ...(source ? { source } : {}),
     assertionTypes: test.assertionTypes || ["functional"],
     attempt: 1,
     maxAttempts,
@@ -339,7 +345,7 @@ export async function executeTestRun({
  * placeholders with that row's values. The test passes only if every row passes.
  * Isolated from executeTestRun so it can't affect normal runs.
  */
-async function executeDataDrivenRun({ test, environmentId, onEvent = () => {}, signal }) {
+async function executeDataDrivenRun({ test, environmentId, onEvent = () => {}, signal, source }) {
   const rows = test.dataRows;
   const [environment, previousRun, { model }, project] = await Promise.all([
     resolveEnvironment(environmentId),
@@ -367,6 +373,7 @@ async function executeDataDrivenRun({ test, environmentId, onEvent = () => {}, s
     testId: test._id,
     status: "running",
     mode: "ui",
+    ...(source ? { source } : {}),
     assertionTypes: test.assertionTypes || ["functional"],
     attempt: 1,
     maxAttempts: rows.length,
