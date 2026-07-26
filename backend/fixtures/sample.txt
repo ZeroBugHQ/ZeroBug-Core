@@ -1,0 +1,2 @@
+ZeroBug sample upload fixture.
+This is a small plain-text file used by the uploadFile action.

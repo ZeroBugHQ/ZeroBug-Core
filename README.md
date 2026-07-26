@@ -660,11 +660,17 @@ Backend commands from `backend/`:
 ```bash
 npm run dev              # Start API with node --watch
 npm start                # Start API normally
-npm test                 # Run node:test suite
+npm test                 # Run the fast unit suite (node:test)
+npm run test:integration # Run real-browser integration tests (needs Chromium)
 npm run smoke            # Smoke test API routes
 npm run install:browser  # Install Playwright Chromium
 npm run db:reset -- --force
 ```
+
+`npm test` runs only the fast, dependency-light unit tests. Real-browser tests
+(named `*.integration.test.js`) are excluded from it and run separately via
+`npm run test:integration`, which launches headless Chromium; they self-skip if
+no Chromium binary is installed (`npm run install:browser`).
 
 Database reset is intentionally opt-in. Running `npm run db:reset` without `--force` prints a warning and does not delete data.
 
@@ -686,11 +692,15 @@ Recommended local verification after changes:
 npm run lint
 npm run build
 cd backend
-npm test
+npm test                 # fast unit suite
+npm run test:integration # real-browser tests (uploads/downloads) — optional, needs Chromium
 npm run smoke
 ```
 
-The smoke test needs MongoDB. Real browser runs need MongoDB, Ollama, and Playwright Chromium.
+`npm test` is the fast unit suite (no browser, no network). `npm run test:integration`
+runs the real-browser tests and needs Playwright Chromium (`npm run install:browser`);
+it self-skips cleanly if Chromium isn't installed. The smoke test needs MongoDB. Real
+browser *runs* (actual test execution) need MongoDB, Ollama, and Playwright Chromium.
 
 ## Troubleshooting
 

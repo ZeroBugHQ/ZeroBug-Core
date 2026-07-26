@@ -11,6 +11,7 @@
     "db:reset": "node src/seed.js",
     "smoke": "node src/smoke.js",
     "test": "node --test",
+    "test:integration": "node scripts/run-integration-tests.js",
     "install:browser": "playwright install chromium"
   },
   "dependencies": {

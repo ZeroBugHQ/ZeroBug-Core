@@ -554,6 +554,16 @@ Actions and their params:
 - select    { "ref": <number>, "value": "..." }  choose a <select> option
 - hover      { "ref": <number> }                 move the mouse over an element to
                                                   reveal fly-out / collapsed menus
+- uploadFile { "ref": <number>, "fixture": "pdf"|"png"|"csv"|"txt" }
+                                                  attach a sample file to a file input or an
+                                                  "Upload"/"Choose file" control (ref = the input
+                                                  or the upload button). Pick the fixture type the
+                                                  task implies (a document -> pdf, an image -> png,
+                                                  a data import -> csv).
+- expectDownload { "ref": <number>, "expectFilename": "*.pdf" (optional) }
+                                                  click a download/export control AND capture the
+                                                  downloaded file. Use this INSTEAD of "click" when
+                                                  the task is to download or export a file.
 - wait      { "ms": <number up to 8000> }        pause for content to load/settle
 - scroll    { "direction": "down" | "up" }       reveal more of the page
 - ask       { "question": "..." }                pause and ask the user when you are
@@ -639,6 +649,8 @@ const DECISION_SCHEMA = {
         "press",
         "select",
         "hover",
+        "uploadFile",
+        "expectDownload",
         "wait",
         "scroll",
         "ask",
@@ -655,6 +667,8 @@ const DECISION_SCHEMA = {
     question: { type: "string" },
     success: { type: "boolean" },
     result: { type: "string" },
+    fixture: { type: "string" },
+    expectFilename: { type: "string" },
   },
   required: ["action"],
 };
@@ -667,6 +681,8 @@ const DECISION_ACTIONS = [
   "press",
   "select",
   "hover",
+  "uploadFile",
+  "expectDownload",
   "wait",
   "scroll",
   "ask",

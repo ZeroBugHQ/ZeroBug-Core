@@ -29,6 +29,10 @@ const testSchema = new Schema(
     tags: { type: [String], default: () => [] }, // freeform labels: smoke, critical, auth…
     // Data-driven: run the test once per row, substituting {{col}} placeholders.
     dataRows: { type: [Schema.Types.Mixed], default: undefined },
+    // Optional test-attached upload fixtures: filenames stored under
+    // dataDir/fixtures/<testId>/. The uploadFile action resolves these before
+    // the bundled fixture library, for content-specific upload tests.
+    fixtures: { type: [String], default: undefined },
     // Ordering: test codes that must PASS before this one runs (queue runs only).
     dependsOn: { type: [String], default: () => [] },
     priority: {

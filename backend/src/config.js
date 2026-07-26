@@ -66,6 +66,10 @@ export const config = {
   // whole settle (domcontentloaded + quiescence + network/loader checks) shares
   // this single budget, so total wait never exceeds it (bar a small tail delay).
   settleMaxMs: int(process.env.SETTLE_MAX_MS, 8000),
+  // How long to wait for a file download to START after the expectDownload
+  // trigger is clicked, before failing the step. Downloads (esp. server-generated
+  // exports/reports) can take a while to begin.
+  downloadTimeoutMs: int(process.env.DOWNLOAD_TIMEOUT_MS, 15000),
 
   artifactsDir: process.env.ARTIFACTS_DIR || path.join(ROOT_DIR, "artifacts"),
   // Private (NOT publicly served) dir for secrets-adjacent files like saved

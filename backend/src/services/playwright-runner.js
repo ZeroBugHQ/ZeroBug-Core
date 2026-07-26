@@ -12,6 +12,7 @@ import {
   writeArtifact,
 } from "./artifact-service.js";
 import { decideAction } from "./ollama.js";
+import { resolveFixture } from "./fixture-service.js";
 
 const MAX_STEPS = 32;
 
@@ -687,6 +688,78 @@ async function applyAction(page, d, handle) {
   }
 }
 
+// Tiny filename matcher for expectDownload's optional expectFilename: supports
+// "*" globs ("*.pdf", "report-*.csv") and falls back to substring match.
+export function matchFilename(name, pattern) {
+  if (!pattern) return true;
+  const n = String(name);
+  if (!pattern.includes("*")) return n.toLowerCase().includes(pattern.toLowerCase());
+  const escaped = pattern.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp("^" + escaped.join(".*") + "$", "i").test(n);
+}
+
+// uploadFile: attach a fixture to a file input. Uses setInputFiles directly on
+// an <input type=file> (bypasses the OS picker entirely — no hang, no dialog
+// interaction). If the ref is a trigger button/label instead, fall back to the
+// filechooser event it opens.
+export async function doUpload(page, d, handle, test) {
+  if (!handle) throw new Error(`No element [${d.ref}] in the current page`);
+  const filePath = await resolveFixture(d.fixture, { testId: test?.id ?? test?._id });
+  const tag = await handle
+    .evaluate((el) => `${el.tagName?.toLowerCase()}|${(el.getAttribute("type") || "").toLowerCase()}`)
+    .catch(() => "");
+  if (tag === "input|file") {
+    await handle.setInputFiles(filePath, { timeout: config.playwrightTimeoutMs });
+  } else {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: config.playwrightTimeoutMs }),
+      handle.click({ timeout: config.playwrightTimeoutMs }),
+    ]);
+    await chooser.setFiles(filePath);
+  }
+  await settle(page);
+  return `Uploaded ${path.basename(filePath)}`;
+}
+
+// expectDownload: atomically arm the download listener AND click the trigger, so
+// there's no window where a listener is armed but the click never comes. Saves
+// the file into the run's artifacts dir and returns an artifact record so it
+// surfaces in run history and reports. Success = event fired within the timeout,
+// non-zero bytes, and (optionally) the suggested filename matches expectFilename.
+export async function doExpectDownload(page, d, handle, artifactScope) {
+  if (!handle) throw new Error(`No element [${d.ref}] in the current page`);
+  let download;
+  try {
+    [download] = await Promise.all([
+      page.waitForEvent("download", { timeout: config.downloadTimeoutMs }),
+      handle.click({ timeout: config.playwrightTimeoutMs }),
+    ]);
+  } catch {
+    throw new Error(
+      `Expected a file download, but none started within ${config.downloadTimeoutMs}ms.`,
+    );
+  }
+  const suggested = download.suggestedFilename() || "download.bin";
+  const savePath = path.join(artifactScope.dir, "downloads", suggested);
+  await fs.mkdir(path.dirname(savePath), { recursive: true });
+  await download.saveAs(savePath);
+  const { size } = await fs.stat(savePath);
+  if (size === 0) throw new Error(`Download "${suggested}" saved but is empty (0 bytes).`);
+  if (!matchFilename(suggested, d.expectFilename)) {
+    throw new Error(
+      `Downloaded "${suggested}" but expected the filename to match "${d.expectFilename}".`,
+    );
+  }
+  return {
+    detail: `Downloaded ${suggested} (${size} bytes)`,
+    artifact: {
+      kind: "file",
+      label: `Download: ${suggested}`,
+      url: `${artifactScope.publicUrlBase}/downloads/${encodeURIComponent(suggested)}`,
+    },
+  };
+}
+
 // Recover a ref the model mentioned in prose ("input #4", "element 7", "field 3")
 // but forgot to put in the structured `ref` field.
 function extractRef(textParts) {
@@ -712,6 +785,10 @@ function actionLabel(d) {
       return `Select "${truncate(d.value, 40)}"`;
     case "hover":
       return `Hover element [${d.ref}]`;
+    case "uploadFile":
+      return `Upload ${d.fixture || "file"} to [${d.ref}]`;
+    case "expectDownload":
+      return `Download via [${d.ref}]${d.expectFilename ? ` (expect ${d.expectFilename})` : ""}`;
     case "wait":
       return `Wait ${d.ms || 1000}ms`;
     case "scroll":
@@ -1363,7 +1440,11 @@ export async function runTest({
         // nudge the model AND auto-recover (scroll to reveal hidden content, wait
         // for late loads) for a few rounds. Only give up if recovery keeps
         // failing — but never on a benign wait, which is a valid stall tactic.
-        const stuck = (repeat >= 2 || noProgress >= 3) && d.action !== "wait" && d.action !== "ask";
+        // expectDownload legitimately produces no visible page change, so don't
+        // let the no-progress detector punish it (same treatment as wait/ask).
+        const stuck =
+          (repeat >= 2 || noProgress >= 3) &&
+          !["wait", "ask", "expectDownload"].includes(d.action);
         if (stuck) {
           if (nudges >= MAX_NUDGES) {
             finish(
@@ -1454,7 +1535,14 @@ export async function runTest({
           d.url = redirectPlaceholder(d.url, environment?.url || taskUrl);
         }
 
-        const needsRef = ["type", "click", "select", "hover"].includes(d.action);
+        const needsRef = [
+          "type",
+          "click",
+          "select",
+          "hover",
+          "uploadFile",
+          "expectDownload",
+        ].includes(d.action);
         if (needsRef) {
           if (typeof d.ref === "string" && /^\d+$/.test(d.ref.trim())) d.ref = Number(d.ref.trim());
           if (!obs.byRef[d.ref]) {
@@ -1477,6 +1565,12 @@ export async function runTest({
             const ms = Math.min(Math.max(Number(d.ms) || 1000, 100), 8000);
             await page.waitForTimeout(ms);
             detail = `Waited ${ms}ms`;
+          } else if (d.action === "uploadFile") {
+            detail = await doUpload(page, d, obs.byRef[d.ref], test);
+          } else if (d.action === "expectDownload") {
+            const dl = await doExpectDownload(page, d, obs.byRef[d.ref], artifactScope);
+            if (dl.artifact) artifacts.push(dl.artifact);
+            detail = dl.detail;
           } else {
             detail = await applyAction(page, d, obs.byRef[d.ref]);
           }
