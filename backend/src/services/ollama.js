@@ -564,6 +564,12 @@ Actions and their params:
                                                   click a download/export control AND capture the
                                                   downloaded file. Use this INSTEAD of "click" when
                                                   the task is to download or export a file.
+- mockRequest { "urlPattern": "**/api/orders", "method": "POST"?, "status": 500?, "body": "..."?, "delayMs": 2000? }
+                                                  stub the response for requests matching urlPattern
+                                                  (a glob) BEFORE the action that triggers them. Use
+                                                  to force an error state (status 500), a specific
+                                                  payload (body), or a slow response (delayMs) so you
+                                                  can test how the app handles it. No ref needed.
 - wait      { "ms": <number up to 8000> }        pause for content to load/settle
 - scroll    { "direction": "down" | "up" }       reveal more of the page
 - ask       { "question": "..." }                pause and ask the user when you are
@@ -651,6 +657,7 @@ const DECISION_SCHEMA = {
         "hover",
         "uploadFile",
         "expectDownload",
+        "mockRequest",
         "wait",
         "scroll",
         "ask",
@@ -669,6 +676,11 @@ const DECISION_SCHEMA = {
     result: { type: "string" },
     fixture: { type: "string" },
     expectFilename: { type: "string" },
+    urlPattern: { type: "string" },
+    method: { type: "string" },
+    status: { type: "number" },
+    body: { type: "string" },
+    delayMs: { type: "number" },
   },
   required: ["action"],
 };
@@ -683,6 +695,7 @@ const DECISION_ACTIONS = [
   "hover",
   "uploadFile",
   "expectDownload",
+  "mockRequest",
   "wait",
   "scroll",
   "ask",

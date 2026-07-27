@@ -698,6 +698,79 @@ export function matchFilename(name, pattern) {
   return new RegExp("^" + escaped.join(".*") + "$", "i").test(n);
 }
 
+// URL matcher for mockRequest/expectRequest patterns. Uses Playwright-native
+// glob semantics (same language page.route() understands, so mock and assert
+// patterns behave identically): `**` = any chars incl. path separators, `*` =
+// any chars within a segment-ish span, `?` = one char. A pattern with NO glob
+// metacharacter falls back to a plain case-insensitive substring test (so
+// "/api/orders" matches without the caller needing wildcards). A malformed glob
+// simply fails to match — a safe, legible failure, unlike a bad regex.
+export function matchUrlGlob(url, pattern) {
+  if (!pattern) return true;
+  const u = String(url);
+  const p = String(pattern);
+  if (!/[*?]/.test(p)) return u.toLowerCase().includes(p.toLowerCase());
+  // Escape regex specials, then translate glob tokens. `**` -> .*, `*` -> [^]* is
+  // overkill; Playwright treats both `*` and `**` as "any chars", so we map both
+  // to `.*` and `?` to a single char. Order matters: handle `**` before `*`.
+  let re = "";
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === "*") {
+      if (p[i + 1] === "*") i++; // collapse ** and * to the same "any chars"
+      re += ".*";
+    } else if (c === "?") {
+      re += ".";
+    } else {
+      re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  try {
+    return new RegExp("^" + re + "$", "i").test(u);
+  } catch {
+    return false;
+  }
+}
+
+// mockRequest: stub or force a response for requests matching a URL glob. Uses
+// page.route (page-scoped, so it's torn down automatically when the per-test page
+// closes — never leaks across pooled context reuse). Records the pattern in
+// mockedPatterns so a deliberately-mocked error isn't flagged in forensics.
+// The route only intercepts matching requests; everything else passes through.
+export async function doMockRequest(page, d, mockedPatterns) {
+  const pattern = String(d.urlPattern || "").trim();
+  if (!pattern) throw new Error(`mockRequest needs a "urlPattern" (e.g. "**/api/orders").`);
+  const status = Number.isFinite(d.status) ? d.status : Number(d.status) || 200;
+  const wantMethod = d.method ? String(d.method).toUpperCase() : null;
+  const delayMs = Math.min(Math.max(Number(d.delayMs) || 0, 0), 15000);
+  const body = d.body != null ? String(d.body) : "";
+  // Content-type: JSON if the body parses as JSON, else plain text.
+  let contentType = "text/plain; charset=utf-8";
+  if (body) {
+    try {
+      JSON.parse(body);
+      contentType = "application/json";
+    } catch {
+      /* keep text/plain */
+    }
+  }
+
+  await page.route(pattern, async (route, request) => {
+    // If a method filter is set and this request doesn't match, let it through
+    // untouched so we only mock what was asked for.
+    if (wantMethod && request.method().toUpperCase() !== wantMethod) {
+      return route.fallback();
+    }
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+    await route.fulfill({ status, contentType, body });
+  });
+
+  mockedPatterns.push(pattern);
+  const suffix = wantMethod ? ` (${wantMethod})` : "";
+  const delayNote = delayMs > 0 ? `, +${delayMs}ms` : "";
+  return `Mocking ${pattern}${suffix} → ${status}${delayNote}`;
+}
+
 // uploadFile: attach a fixture to a file input. Uses setInputFiles directly on
 // an <input type=file> (bypasses the OS picker entirely — no hang, no dialog
 // interaction). If the ref is a trigger button/label instead, fall back to the
@@ -789,6 +862,8 @@ function actionLabel(d) {
       return `Upload ${d.fixture || "file"} to [${d.ref}]`;
     case "expectDownload":
       return `Download via [${d.ref}]${d.expectFilename ? ` (expect ${d.expectFilename})` : ""}`;
+    case "mockRequest":
+      return `Mock ${d.urlPattern || "request"}${d.status ? ` → ${d.status}` : ""}`;
     case "wait":
       return `Wait ${d.ms || 1000}ms`;
     case "scroll":
@@ -976,6 +1051,22 @@ export async function runTest({
   const seenTextParts = [];
   const seenUrls = new Set();
 
+  // ── Network assertion/mocking layer (Q5/Q10) ───────────────────────────────
+  // Full-fidelity request log for expectRequest assertions (distinct from the
+  // lossy, errors-only forensics list above): every request the page fires, with
+  // its method, post body, and the agent step it happened on (for `sinceStep`).
+  const requestLog = [];
+  const REQ_CAP = 300;
+  // Active mock URL globs, so response/requestfailed forensics can skip a
+  // deliberately-mocked response instead of flagging it as a real failure.
+  const mockedPatterns = [];
+  // The current agent step, stamped onto each logged request. Updated by the
+  // main loop; starts at 0 for page-load traffic before the first action.
+  let currentStep = 0;
+  const setCurrentStep = (n) => {
+    currentStep = n;
+  };
+
   // Attach forensics + safety listeners to a page. Called for the main page and
   // any popup/new tab we switch into, so nothing is missed.
   function attachPageHandlers(p) {
@@ -990,7 +1081,27 @@ export async function runTest({
         consoleErrors.push({ type: "pageerror", text: truncate(err?.message || String(err), 300) });
       }
     });
+    // Full-fidelity assertion log: every request, with method + post body +
+    // the agent step it fired on. Separate from the forensics list below.
+    p.on("request", (req) => {
+      if (requestLog.length < REQ_CAP) {
+        requestLog.push({
+          url: req.url(),
+          method: req.method(),
+          postData: (() => {
+            try {
+              return req.postData() || "";
+            } catch {
+              return "";
+            }
+          })(),
+          step: currentStep,
+        });
+      }
+    });
     p.on("requestfailed", (req) => {
+      // A deliberately-mocked request isn't a real failure — don't flag it.
+      if (mockedPatterns.some((pat) => matchUrlGlob(req.url(), pat))) return;
       if (networkFailures.length < CAP) {
         networkFailures.push({
           url: truncate(req.url(), 200),
@@ -1001,6 +1112,9 @@ export async function runTest({
     });
     p.on("response", (resp) => {
       const status = resp.status();
+      // Skip forensics for a deliberately-mocked response (e.g. a forced 500):
+      // it's expected, not a real network failure.
+      if (mockedPatterns.some((pat) => matchUrlGlob(resp.url(), pat))) return;
       if (status >= 400 && networkFailures.length < CAP) {
         networkFailures.push({
           url: truncate(resp.url(), 200),
@@ -1124,6 +1238,11 @@ export async function runTest({
     // Detach the popup listener from a shared context (else listeners pile up),
     // then close only OUR page — the pool owns the shared context's lifecycle.
     if (pooled && context) context.off("page", onPopup);
+    // Defensive: drop any mockRequest route handlers before closing the page.
+    // page.close() already disposes page-scoped routes (so nothing leaks across a
+    // pooled context reuse), but unrouting explicitly keeps teardown obvious and
+    // covers the instant between close scheduling and completion.
+    if (mockedPatterns.length) await page?.unrouteAll?.().catch(() => {});
     await page?.close().catch(() => {});
 
     if (video) {
@@ -1444,7 +1563,7 @@ export async function runTest({
         // let the no-progress detector punish it (same treatment as wait/ask).
         const stuck =
           (repeat >= 2 || noProgress >= 3) &&
-          !["wait", "ask", "expectDownload"].includes(d.action);
+          !["wait", "ask", "expectDownload", "mockRequest"].includes(d.action);
         if (stuck) {
           if (nudges >= MAX_NUDGES) {
             finish(
@@ -1558,6 +1677,9 @@ export async function runTest({
         }
 
         onEvent({ type: "step", index: i, label, status: "running" });
+        // Stamp subsequent network requests with this step, so expectRequest's
+        // `sinceStep` can scope assertions to traffic from a given action onward.
+        setCurrentStep(step);
         try {
           throwIfAborted(signal);
           let detail;
@@ -1571,6 +1693,8 @@ export async function runTest({
             const dl = await doExpectDownload(page, d, obs.byRef[d.ref], artifactScope);
             if (dl.artifact) artifacts.push(dl.artifact);
             detail = dl.detail;
+          } else if (d.action === "mockRequest") {
+            detail = await doMockRequest(page, d, mockedPatterns);
           } else {
             detail = await applyAction(page, d, obs.byRef[d.ref]);
           }
