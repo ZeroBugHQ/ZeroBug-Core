@@ -114,9 +114,10 @@ const MAX_ELEMENTS = 60;
 
 // Tag visible, innermost interactive elements in one frame's document with
 // data-zerobug-ref numbers starting at `startRef`, and return their descriptors.
-// Runs inside the browser (via frame.evaluate). Cross-origin frames throw and
-// are skipped by the caller.
-function tagFrameElements({ startRef, max }) {
+// Runs inside the browser (via frame.evaluate). Walks the light DOM and all OPEN
+// shadow roots (recursively); closed shadow roots are unreachable by design and
+// are passed over. Must stay self-contained — it is serialized to run in-page.
+export function tagFrameElements({ startRef, max }) {
   document.querySelectorAll("[data-zerobug-ref]").forEach((e) => e.removeAttribute("data-zerobug-ref"));
 
   const visible = (el) => {
@@ -140,10 +141,44 @@ function tagFrameElements({ startRef, max }) {
     return false;
   };
 
-  const cand = Array.from(document.querySelectorAll("body *")).filter(
-    (el) => visible(el) && interactive(el),
-  );
-  const pick = cand.filter((el) => !cand.some((o) => o !== el && el.contains(o)));
+  // Walk the light DOM AND every OPEN shadow root (recursively, incl. nested /
+  // composed shadow trees), so elements inside web components are reachable.
+  // Closed shadow roots (el.shadowRoot === null by design) are unreachable by
+  // any legitimate means and are silently passed over — a real, unavoidable
+  // limitation, not a bug. Depth- and budget-capped to bound work on
+  // pathologically deep component trees.
+  const SHADOW_MAX_DEPTH = 10;
+  const collectDeep = (root, depth, acc) => {
+    if (depth > SHADOW_MAX_DEPTH || acc.length >= max * 8) return acc;
+    const all = root.querySelectorAll("*");
+    for (const el of all) {
+      acc.push(el);
+      // Descend into an OPEN shadow root if this element hosts one.
+      if (el.shadowRoot) collectDeep(el.shadowRoot, depth + 1, acc);
+    }
+    return acc;
+  };
+  const all = collectDeep(document.body || document.documentElement, 0, []);
+  const cand = all.filter((el) => visible(el) && interactive(el));
+
+  // Composed "contains": true if `host` contains `node` across shadow boundaries
+  // (node's shadow-including ancestor chain reaches host). Node.contains() alone
+  // stops at a shadow boundary, so without this a shadow host and its inner
+  // interactive content would BOTH be tagged — two refs for one control. We drop
+  // the bare host in favor of the real inner element(s).
+  const composedContains = (host, node) => {
+    if (host === node) return false;
+    if (host.contains(node)) return true;
+    let n = node;
+    while (n) {
+      if (n === host) return true;
+      const rootNode = n.getRootNode && n.getRootNode();
+      // Step out of a shadow root to its host, then keep climbing.
+      n = n.parentNode || (rootNode && rootNode.host) || null;
+    }
+    return false;
+  };
+  const pick = cand.filter((el) => !cand.some((o) => o !== el && composedContains(el, o)));
 
   const CONTROL = new Set(["input", "textarea", "select"]);
   const out = [];
@@ -158,7 +193,11 @@ function tagFrameElements({ startRef, max }) {
       el.getAttribute("title") ||
       "";
     if (!label && el.id) {
-      const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      // Labels are scoped to the element's own (possibly shadow) root, so search
+      // there rather than the top document — a `label[for]` inside a shadow root
+      // isn't found by document.querySelector.
+      const scope = (el.getRootNode && el.getRootNode()) || document;
+      const lbl = scope.querySelector(`label[for="${CSS.escape(el.id)}"]`);
       if (lbl) label = lbl.innerText;
     }
     const text = (el.innerText || el.value || el.getAttribute("value") || "")

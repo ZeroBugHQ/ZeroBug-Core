@@ -44,6 +44,7 @@ Key capabilities:
 
 - Agentic Playwright runner that observes the live DOM, tags interactive elements, chooses the next action with an LLM, and re-observes after each step.
 - Same-origin iframe scanning, dialog/popup detection, and login-form detection.
+- Shadow DOM piercing: the observer walks open shadow roots (including nested/composed ones), so elements inside web components are targetable. Closed shadow roots (`mode: "closed"`) are inaccessible to any script by design and cannot be reached — a real, unavoidable limitation.
 - Anti-stuck recovery: page fingerprinting, no-progress detection, escalating nudges, and auto-retry of transient element errors.
 - Evidence-backed assertion verification so the agent can't declare a false pass.
 - Abortable runs — Stop cancels the in-flight model call and ends the run promptly.
