@@ -50,6 +50,8 @@ Key capabilities:
 - Per-category persistent browser context pool: a category logs in once and every test in it reuses the live session.
 - Agent site-memory: the runner learns per-site lessons from past runs (popups, login quirks, slow/flaky areas), reuses them as hints, and reinforces or prunes them by outcome — growing more reliable over time.
 - Auto-retry with a configurable per-test retry budget.
+- File upload and download in a flow: attach a bundled or test-supplied fixture to a file input (`uploadFile`), and capture a triggered download as a run artifact (`expectDownload`).
+- Network interception and assertion: stub, error, or slow a matching request with `mockRequest` (to force a backend condition or isolate a flaky third-party dependency), and assert the app actually sent a request with `expectRequest` (to verify a UI action triggered the right backend call — a POST after a submit, say). Both match requests by a URL glob.
 
 **Model providers**
 
@@ -61,6 +63,7 @@ Key capabilities:
 
 - UI, API, visual-regression, and accessibility assertion modes.
 - Visual baselines and pixel diffs (pixelmatch), and axe-core accessibility audits.
+- Network assertions inside a UI run: assert a specific request fired with the expected method and payload (`expectRequest`), so a UI step can be chained into a backend-call check without a separate API test.
 
 **Chat**
 

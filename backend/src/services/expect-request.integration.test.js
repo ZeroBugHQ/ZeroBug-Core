@@ -146,4 +146,32 @@ describe("expectRequest + Q10 UI->API chain (real Chromium)", () => {
       await page.close();
     }
   });
+
+  test("mock + expect together: SLOW endpoint (delayMs), request still asserted", async (t) => {
+    if (!browser) return t.skip("no browser");
+    const page = await browser.newPage();
+    const { log, ctl } = capture(page);
+    try {
+      // Mock the endpoint to respond slowly (500ms) — simulating a laggy backend.
+      await doMockRequest(
+        page,
+        { urlPattern: "**/api/orders", method: "POST", status: 200, body: "slow-ok", delayMs: 500 },
+        [],
+      );
+      await page.goto(base, { waitUntil: "networkidle" });
+      ctl.step = 5;
+      const clickedAt = Date.now();
+      await page.click("#place");
+      await page.waitForFunction(() => document.getElementById("out").textContent === "slow-ok", {
+        timeout: 8000,
+      });
+      // The response was deliberately delayed, but the request itself fired
+      // promptly on click — expectRequest sees it regardless of response timing.
+      assert.ok(Date.now() - clickedAt >= 450, "the mocked response was actually delayed");
+      const res = doExpectRequest(log, { urlPattern: "**/api/orders", method: "POST", sinceStep: 5 });
+      assert.equal(res.ok, true, res.detail);
+    } finally {
+      await page.close();
+    }
+  });
 });

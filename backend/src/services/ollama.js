@@ -565,18 +565,26 @@ Actions and their params:
                                                   downloaded file. Use this INSTEAD of "click" when
                                                   the task is to download or export a file.
 - mockRequest { "urlPattern": "**/api/orders", "method": "POST"?, "status": 500?, "body": "..."?, "delayMs": 2000? }
-                                                  stub the response for requests matching urlPattern
-                                                  (a glob) BEFORE the action that triggers them. Use
-                                                  to force an error state (status 500), a specific
-                                                  payload (body), or a slow response (delayMs) so you
-                                                  can test how the app handles it. No ref needed.
+                                                  Stub the response for requests matching urlPattern
+                                                  (a glob), set up BEFORE the action that triggers them.
+                                                  Reach for this when the TASK asks you to test how the
+                                                  app behaves under a specific backend condition you
+                                                  can't otherwise force: an error state (status 500/404),
+                                                  a particular response payload (body), or a slow
+                                                  network (delayMs) — or to isolate a flow from a
+                                                  flaky/third-party API. Only mock when the task calls
+                                                  for it; for a normal happy-path run, don't mock. No ref.
 - expectRequest { "urlPattern": "**/api/orders", "method": "POST"?, "bodyContains": "..."?, "sinceStep": <n>? }
-                                                  assert the app actually SENT a matching request. Use
-                                                  AFTER the UI action that should trigger it (e.g.
-                                                  click submit, then expectRequest the POST). sinceStep
-                                                  scopes the check to requests since a given step, so
-                                                  earlier page-load traffic doesn't satisfy it. Fails
-                                                  the test if no matching request fired. No ref needed.
+                                                  Assert the app actually SENT a matching request.
+                                                  Reach for this to verify a UI action really triggered
+                                                  the right backend call — most useful right AFTER a
+                                                  submit / checkout / save / delete, e.g. click "Place
+                                                  order" then expectRequest the POST /api/orders (add
+                                                  bodyContains to check the payload carried the right
+                                                  data). ALWAYS set sinceStep to the step number of that
+                                                  triggering action, so unrelated page-load traffic from
+                                                  earlier can't accidentally satisfy the check. Fails the
+                                                  test if no matching request fired. No ref.
 - wait      { "ms": <number up to 8000> }        pause for content to load/settle
 - scroll    { "direction": "down" | "up" }       reveal more of the page
 - ask       { "question": "..." }                pause and ask the user when you are

@@ -913,9 +913,9 @@ function actionLabel(d) {
     case "expectDownload":
       return `Download via [${d.ref}]${d.expectFilename ? ` (expect ${d.expectFilename})` : ""}`;
     case "mockRequest":
-      return `Mock ${d.urlPattern || "request"}${d.status ? ` → ${d.status}` : ""}`;
+      return `Mock ${d.method ? d.method + " " : ""}${truncate(d.urlPattern || "request", 40)}${d.status ? ` → ${d.status}` : ""}`;
     case "expectRequest":
-      return `Expect request ${d.method ? d.method + " " : ""}${d.urlPattern || ""}`;
+      return `Expect ${d.method ? d.method + " " : ""}${truncate(d.urlPattern || "request", 40)}`;
     case "wait":
       return `Wait ${d.ms || 1000}ms`;
     case "scroll":
