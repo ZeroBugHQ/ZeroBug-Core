@@ -771,6 +771,56 @@ export async function doMockRequest(page, d, mockedPatterns) {
   return `Mocking ${pattern}${suffix} → ${status}${delayNote}`;
 }
 
+// expectRequest: assert that a request matching urlPattern (a glob) fired during
+// the run. Optional filters: method, bodyContains (substring of the request's
+// post body), and sinceStep (only requests logged at/after that agent step, so
+// an assertion isn't satisfied by unrelated earlier page-load traffic). Pure
+// over the captured requestLog — no browser needed, so it's directly unit-tested.
+// Returns { ok, detail, evidence }.
+export function doExpectRequest(requestLog, d) {
+  const pattern = String(d.urlPattern || "").trim();
+  if (!pattern) throw new Error(`expectRequest needs a "urlPattern" (e.g. "**/api/orders").`);
+  const wantMethod = d.method ? String(d.method).toUpperCase() : null;
+  const bodyNeedle = d.bodyContains != null ? String(d.bodyContains) : null;
+  const sinceStep = Number.isFinite(d.sinceStep) ? d.sinceStep : Number(d.sinceStep);
+  const since = Number.isFinite(sinceStep) ? sinceStep : null;
+
+  // The window we searched, for a legible failure message.
+  const inWindow = requestLog.filter((r) => (since == null ? true : r.step >= since));
+
+  const match = inWindow.find((r) => {
+    if (!matchUrlGlob(r.url, pattern)) return false;
+    if (wantMethod && r.method.toUpperCase() !== wantMethod) return false;
+    if (bodyNeedle && !String(r.postData || "").includes(bodyNeedle)) return false;
+    return true;
+  });
+
+  const want =
+    `${wantMethod ? wantMethod + " " : ""}${pattern}` +
+    (bodyNeedle ? ` with body containing "${truncate(bodyNeedle, 60)}"` : "") +
+    (since != null ? ` (since step ${since})` : "");
+
+  if (match) {
+    return {
+      ok: true,
+      detail: `Saw ${match.method} ${truncate(match.url, 100)}`,
+      evidence: { matched: { method: match.method, url: match.url, step: match.step } },
+    };
+  }
+
+  // No match: list what WAS seen in the window (deduped, capped) so a failing
+  // test is debuggable — "expected X, but the only requests were Y, Z".
+  const seen = [...new Set(inWindow.map((r) => `${r.method} ${truncate(r.url, 100)}`))].slice(0, 8);
+  const seenNote = seen.length
+    ? `Requests observed${since != null ? ` since step ${since}` : ""}: ${seen.join("; ")}`
+    : `No requests were observed${since != null ? ` since step ${since}` : ""}.`;
+  return {
+    ok: false,
+    detail: `Expected a request matching ${want}, but none fired. ${seenNote}`,
+    evidence: { expected: want, observed: seen },
+  };
+}
+
 // uploadFile: attach a fixture to a file input. Uses setInputFiles directly on
 // an <input type=file> (bypasses the OS picker entirely — no hang, no dialog
 // interaction). If the ref is a trigger button/label instead, fall back to the
@@ -864,6 +914,8 @@ function actionLabel(d) {
       return `Download via [${d.ref}]${d.expectFilename ? ` (expect ${d.expectFilename})` : ""}`;
     case "mockRequest":
       return `Mock ${d.urlPattern || "request"}${d.status ? ` → ${d.status}` : ""}`;
+    case "expectRequest":
+      return `Expect request ${d.method ? d.method + " " : ""}${d.urlPattern || ""}`;
     case "wait":
       return `Wait ${d.ms || 1000}ms`;
     case "scroll":
@@ -1563,7 +1615,7 @@ export async function runTest({
         // let the no-progress detector punish it (same treatment as wait/ask).
         const stuck =
           (repeat >= 2 || noProgress >= 3) &&
-          !["wait", "ask", "expectDownload", "mockRequest"].includes(d.action);
+          !["wait", "ask", "expectDownload", "mockRequest", "expectRequest"].includes(d.action);
         if (stuck) {
           if (nudges >= MAX_NUDGES) {
             finish(
@@ -1695,6 +1747,16 @@ export async function runTest({
             detail = dl.detail;
           } else if (d.action === "mockRequest") {
             detail = await doMockRequest(page, d, mockedPatterns);
+          } else if (d.action === "expectRequest") {
+            const res = doExpectRequest(requestLog, d);
+            if (!res.ok) {
+              // An explicit network assertion that didn't hold is a definitive
+              // failure — end the run now so a later finish can't paper over it.
+              finish(i, label, "fail", res.detail);
+              history.push(`#${step} expectRequest FAILED: ${truncate(res.detail, 90)}`);
+              return finalize("failed", res.detail);
+            }
+            detail = res.detail;
           } else {
             detail = await applyAction(page, d, obs.byRef[d.ref]);
           }

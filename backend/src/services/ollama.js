@@ -570,6 +570,13 @@ Actions and their params:
                                                   to force an error state (status 500), a specific
                                                   payload (body), or a slow response (delayMs) so you
                                                   can test how the app handles it. No ref needed.
+- expectRequest { "urlPattern": "**/api/orders", "method": "POST"?, "bodyContains": "..."?, "sinceStep": <n>? }
+                                                  assert the app actually SENT a matching request. Use
+                                                  AFTER the UI action that should trigger it (e.g.
+                                                  click submit, then expectRequest the POST). sinceStep
+                                                  scopes the check to requests since a given step, so
+                                                  earlier page-load traffic doesn't satisfy it. Fails
+                                                  the test if no matching request fired. No ref needed.
 - wait      { "ms": <number up to 8000> }        pause for content to load/settle
 - scroll    { "direction": "down" | "up" }       reveal more of the page
 - ask       { "question": "..." }                pause and ask the user when you are
@@ -658,6 +665,7 @@ const DECISION_SCHEMA = {
         "uploadFile",
         "expectDownload",
         "mockRequest",
+        "expectRequest",
         "wait",
         "scroll",
         "ask",
@@ -681,6 +689,8 @@ const DECISION_SCHEMA = {
     status: { type: "number" },
     body: { type: "string" },
     delayMs: { type: "number" },
+    bodyContains: { type: "string" },
+    sinceStep: { type: "number" },
   },
   required: ["action"],
 };
@@ -696,6 +706,7 @@ const DECISION_ACTIONS = [
   "uploadFile",
   "expectDownload",
   "mockRequest",
+  "expectRequest",
   "wait",
   "scroll",
   "ask",
