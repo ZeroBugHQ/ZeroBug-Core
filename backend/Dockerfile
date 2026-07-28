@@ -7,9 +7,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Install the Chromium build matching the installed Playwright version, plus the
-# OS libraries it needs. Done after npm ci so the version lines up exactly.
-RUN npx playwright install --with-deps chromium
+# Browser engines to install. Chromium is always included (small, default);
+# add Firefox/WebKit by building with e.g.
+#   docker build --build-arg PLAYWRIGHT_ENGINES="firefox webkit" .
+# Each extra engine adds ~120-150MB to the image, so they're opt-in.
+ARG PLAYWRIGHT_ENGINES=""
+# Install the browser builds matching the installed Playwright version, plus the
+# OS libraries they need. Done after npm ci so the versions line up exactly.
+RUN PLAYWRIGHT_ENGINES="$PLAYWRIGHT_ENGINES" npm run install:browsers
 
 # App source
 COPY . .

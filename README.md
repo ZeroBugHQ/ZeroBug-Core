@@ -668,9 +668,35 @@ npm start                # Start API normally
 npm test                 # Run the fast unit suite (node:test)
 npm run test:integration # Run real-browser integration tests (needs Chromium)
 npm run smoke            # Smoke test API routes
-npm run install:browser  # Install Playwright Chromium
+npm run install:browser  # Install Playwright Chromium (only)
+npm run install:browsers # Install Chromium + any engines in PLAYWRIGHT_ENGINES
 npm run db:reset -- --force
 ```
+
+### Browser engines
+
+Chromium is always installed and is the default engine. Firefox and WebKit are
+opt-in, because each adds ~120–150 MB. Install the extras you want:
+
+```bash
+# Chromium + Firefox + WebKit
+PLAYWRIGHT_ENGINES="firefox webkit" npm run install:browsers
+# or pass them as args
+npm run install:browsers -- firefox webkit
+```
+
+In Docker, choose engines at build time (Chromium-only by default):
+
+```bash
+docker build --build-arg PLAYWRIGHT_ENGINES="firefox webkit" -f backend/Dockerfile backend/
+```
+
+A test's engine is set per test (Advanced options → Browser), and automation
+callers can override the engine for a whole run/queue. If a test requests an
+engine that isn't installed, the run fails with a clear message telling you
+which `playwright install` to run. Note: Firefox can't emulate touch, so a
+`mobile`/`tablet` viewport on Firefox uses the viewport **size** only (not touch
+input); WebKit emulates touch fully. This is recorded per run in the run history.
 
 `npm test` runs only the fast, dependency-light unit tests. Real-browser tests
 (named `*.integration.test.js`) are excluded from it and run separately via

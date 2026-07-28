@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ImagePlus, Monitor, Smartphone, Tablet, X } from "lucide-react";
+import {
+  ChevronDown,
+  Circle,
+  ImagePlus,
+  Monitor,
+  Smartphone,
+  Square,
+  Tablet,
+  Triangle,
+  X,
+} from "lucide-react";
 import type { TestCase } from "@/lib/mock-tests";
 import type { ApiTestConfig, Category, NewTestInput } from "@/lib/api";
 import { StyledSelect } from "@/components/styled-select";
@@ -9,6 +19,15 @@ type Priority = TestCase["priority"];
 type TestMode = TestCase["mode"];
 type Viewport = NonNullable<TestCase["viewport"]>;
 type AssertionType = TestCase["assertionTypes"][number];
+
+type Engine = NonNullable<TestCase["engine"]>;
+// Neutral, non-brand shapes — easy to tell apart at a glance without borrowing
+// any browser's logo/identity (this feature isn't affiliated with those brands).
+const ENGINES: Array<{ key: Engine; label: string; icon: typeof Monitor }> = [
+  { key: "chromium", label: "Chromium", icon: Circle },
+  { key: "firefox", label: "Firefox", icon: Square },
+  { key: "webkit", label: "WebKit", icon: Triangle },
+];
 
 const VIEWPORTS: Array<{ key: Viewport; label: string; icon: typeof Monitor }> = [
   { key: "desktop", label: "Desktop", icon: Monitor },
@@ -115,6 +134,7 @@ export function AddTestModal({
   const [budgetSec, setBudgetSec] = useState("");
   const [mode, setMode] = useState<TestMode>("ui");
   const [viewport, setViewport] = useState<Viewport>("desktop");
+  const [engine, setEngine] = useState<Engine>("chromium");
   const [categoryId, setCategoryId] = useState<string>("");
   const [assertionTypes, setAssertionTypes] = useState<AssertionType[]>(["functional"]);
   const [apiMethod, setApiMethod] = useState("GET");
@@ -146,6 +166,7 @@ export function AddTestModal({
     setBudgetSec(initial?.budgetMs ? String(initial.budgetMs / 1000) : "");
     setMode(initial?.mode ?? "ui");
     setViewport(initial?.viewport ?? "desktop");
+    setEngine(initial?.engine ?? "chromium");
     setCategoryId(initial?.categoryId ?? "");
     setAssertionTypes(initial?.assertionTypes?.length ? initial.assertionTypes : ["functional"]);
     setApiMethod(initial?.apiConfig?.method ?? "GET");
@@ -167,6 +188,7 @@ export function AddTestModal({
           (initial.budgetMs && initial.budgetMs > 0) ||
           (initial.maxRetries && initial.maxRetries > 0) ||
           (initial.viewport && initial.viewport !== "desktop") ||
+          (initial.engine && initial.engine !== "chromium") ||
           (initial.assertionTypes && initial.assertionTypes.some((a) => a !== "functional")) ||
           (initial.attachments && initial.attachments.length) ||
           (initial.apiConfig?.headers && Object.keys(initial.apiConfig.headers).length) ||
@@ -257,6 +279,7 @@ export function AddTestModal({
       mode,
       categoryId: categoryId || null,
       viewport: mode === "ui" ? viewport : undefined,
+      engine: mode === "ui" ? engine : undefined,
       assertionTypes:
         mode === "api"
           ? ["functional"]
@@ -512,6 +535,33 @@ export function AddTestModal({
                           </button>
                         ))}
                       </div>
+                    </Field>
+
+                    <Field label="Browser">
+                      <div className="flex gap-1.5">
+                        {ENGINES.map((e) => (
+                          <button
+                            key={e.key}
+                            type="button"
+                            onClick={() => setEngine(e.key)}
+                            className={cn(
+                              "flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition",
+                              engine === e.key
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            <e.icon className="h-3.5 w-3.5" />
+                            {e.label}
+                          </button>
+                        ))}
+                      </div>
+                      {engine === "firefox" && (viewport === "mobile" || viewport === "tablet") && (
+                        <p className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground">
+                          Firefox can’t emulate touch — a {viewport} viewport uses the mobile size
+                          only, not touch input.
+                        </p>
+                      )}
                     </Field>
 
                     <Field label="Assertions">

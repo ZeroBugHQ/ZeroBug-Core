@@ -290,6 +290,7 @@ export interface NewTestInput {
   maxRetries?: number;
   mode?: TestCase["mode"];
   viewport?: TestCase["viewport"];
+  engine?: TestCase["engine"];
   assertionTypes?: TestCase["assertionTypes"];
   apiConfig?: ApiTestConfig;
   categoryId?: string | null;

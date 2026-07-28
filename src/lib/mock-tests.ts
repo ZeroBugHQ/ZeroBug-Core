@@ -38,6 +38,7 @@ export interface TestCase {
   maxRetries: number;
   mode: TestMode;
   viewport?: "desktop" | "tablet" | "mobile";
+  engine?: "chromium" | "firefox" | "webkit";
   assertionTypes: AssertionType[];
   apiConfig?: ApiTestConfig;
   createdAt?: string;
