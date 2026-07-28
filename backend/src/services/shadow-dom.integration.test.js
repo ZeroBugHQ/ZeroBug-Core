@@ -56,7 +56,10 @@ describe("shadow DOM piercing (real Chromium)", () => {
       assert.ok(handles.length >= 2, "both light + shadow elements carry a ref attribute");
       const shadowHandle = await page.$('[aria-label="Shadow Save"]');
       assert.ok(shadowHandle, "shadow button handle resolvable");
-      await shadowHandle.click({ timeout: 2000 });
+      // Generous timeout: the full integration run launches three browser
+      // engines in sequence, and a tight 2s click can flake under that
+      // resource contention (the click itself is trivial).
+      await shadowHandle.click({ timeout: 15000 });
     } finally {
       await page.close();
     }
