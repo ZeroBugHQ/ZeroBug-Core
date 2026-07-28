@@ -220,18 +220,30 @@ export function tagFrameElements({ startRef, max }) {
 // Observe the live page across the main document AND same-origin iframes, so
 // embedded forms/widgets are reachable. Element refs are numbered globally and
 // their handles come from whichever frame they live in.
-async function observe(page) {
+export async function observe(page) {
   const elements = [];
   const byRef = {};
   let refCount = 0;
 
   for (const frame of page.frames()) {
     if (refCount >= MAX_ELEMENTS) break;
+    // Skip frames that are already gone (a cheap pre-check for the common case)
+    // or are error placeholders. Cross-origin frames are NOT skipped: Playwright
+    // evaluates in each frame's own context, so a cross-origin child (embedded
+    // payment/auth widgets like Stripe Elements) is tagged and actioned normally.
+    if (frame.isDetached() || frame.url().startsWith("chrome-error://")) continue;
     const frameEls = await frame
       .evaluate(tagFrameElements, { startRef: refCount, max: MAX_ELEMENTS - refCount })
-      .catch(() => []); // cross-origin frame → not accessible, skip
+      // Retained catch for the genuine race the old "cross-origin not accessible"
+      // comment mislabeled: a frame can navigate away or be removed BETWEEN the
+      // page.frames() enumeration and this call resolving, which rejects with
+      // "Frame was detached". That's common in the wild (ad/analytics iframes,
+      // SPA content swaps, OAuth redirects). Never let it crash the run — skip the
+      // frame. Cross-origin frames do NOT throw here; they flow through normally.
+      .catch(() => []);
     if (!frameEls.length) continue;
 
+    // The same detachment race applies to $$ (also throws "Frame was detached").
     const tagged = await frame.$$("[data-zerobug-ref]").catch(() => []);
     for (const h of tagged) {
       const r = await h.getAttribute("data-zerobug-ref").catch(() => null);
