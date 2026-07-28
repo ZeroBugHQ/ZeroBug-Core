@@ -12,6 +12,7 @@ import { resolveAvailableModel } from "./ollama.js";
 import { getSecretMap } from "./secret-service.js";
 import { sessionPath, sessionExists, ensureSessionDir } from "./session-store.js";
 import { acquirePooledContext } from "./browser-pool.js";
+import { resolveEngine } from "./browser-engines.js";
 import { refreshFlakyFlag } from "./insights-service.js";
 import { getHints, reinforce, recordLessons } from "./site-memory-service.js";
 
@@ -100,6 +101,7 @@ export async function executeTestRun({
   pooled = false,
   source,
   maxRetries,
+  engine: engineOverride,
 }) {
   const test = await Test.findById(testId);
   if (!test) throw new Error("Test not found");
@@ -136,6 +138,10 @@ export async function executeTestRun({
   // budget; when omitted (the UI path), fall back to the test's own setting.
   const retryBudget = maxRetries != null ? maxRetries : test.maxRetries;
   const maxAttempts = Math.max(1, Number(retryBudget ?? 0) + 1);
+
+  // Engine resolution, same override precedence as maxRetries: an explicit
+  // per-run/queue override wins, else the test's own engine, else chromium.
+  const engine = resolveEngine(engineOverride ?? test.engine);
 
   test.status = "running";
   test.durationMs = undefined;
@@ -192,9 +198,12 @@ export async function executeTestRun({
   if (pooled && test.mode !== "api" && sessionKey) {
     try {
       pool = await acquirePooledContext({
-        poolKey: `${sessionKey}__${test.viewport || "desktop"}`,
+        // Engine is a 4th key segment so a chromium run and a firefox run against
+        // the same category never share/corrupt a pooled context.
+        poolKey: `${sessionKey}__${test.viewport || "desktop"}__${engine}`,
         groupId: String(test.projectId),
         viewport: test.viewport,
+        engine,
         storageStateLoad: hasSession && sessionKey ? sessionPath(sessionKey) : undefined,
         storageStatePath: sessionKey ? sessionPath(sessionKey) : undefined,
       });
@@ -256,6 +265,7 @@ export async function executeTestRun({
               runId: run.id,
               attempt,
               model,
+              engine,
               // Reuse the live category context; the pool was authenticated once.
               sharedContext: pool?.context,
               sessionReused: pool ? pool.reused : hasSession,

@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
 import { config } from "../config.js";
 import { viewportContextOptions, videoSizeFor } from "./playwright-runner.js";
+import { launchBrowser } from "./browser-engines.js";
 
 // A pool of LIVE, long-lived Playwright browser contexts — one per category
 // (keyed by env + category + viewport). During a "Run all"/queue run, every
@@ -42,6 +42,7 @@ export async function acquirePooledContext({
   poolKey,
   groupId,
   viewport,
+  engine = "chromium",
   storageStateLoad,
   storageStatePath,
 }) {
@@ -62,8 +63,8 @@ export async function acquirePooledContext({
     let reused = true;
     if (!entry.context) {
       reused = false;
-      const browser = await chromium.launch({ headless: config.playwrightHeadless });
-      const deviceOpts = viewportContextOptions(viewport);
+      const browser = await launchBrowser(engine);
+      const deviceOpts = viewportContextOptions(viewport, engine);
       entry.videoDir = path.join(config.dataDir, "pool-media", sanitize(poolKey));
       await fs.mkdir(entry.videoDir, { recursive: true }).catch(() => {});
       const context = await browser.newContext({

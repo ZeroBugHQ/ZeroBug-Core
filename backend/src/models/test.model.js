@@ -51,6 +51,10 @@ const testSchema = new Schema(
     // Emulated form-factor for UI runs (Chromium only; mobile/tablet set viewport
     // + touch + mobile user-agent via Playwright device descriptors).
     viewport: { type: String, enum: ["desktop", "tablet", "mobile"], default: "desktop" },
+    // Browser engine to run this test on. A per-run/queue override can supersede
+    // it (resolution: run override -> this field -> chromium). Firefox/WebKit
+    // must be installed on the host; chromium is always available.
+    engine: { type: String, enum: ["chromium", "firefox", "webkit"], default: "chromium" },
     assertionTypes: {
       type: [String],
       enum: ["functional", "visual", "a11y"],

@@ -98,6 +98,7 @@ export async function runQueue({
   suite,
   source = "queue",
   maxRetries,
+  engine,
   callbackUrl,
   onEvent = () => {},
   runTest, // testing seam; omitted in production -> real executor
@@ -112,6 +113,7 @@ export async function runQueue({
       suite,
       source,
       maxRetries,
+      engine,
       pause: true,
       callbackUrl: callbackUrl || project.webhookCallbackUrl,
       buildSummary: true,

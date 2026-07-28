@@ -228,7 +228,7 @@ async function buildQueueSummary(projectId, source, startedAt, completedTestIds 
 // The default per-test executor: runs the agent via Playwright, reusing a
 // pooled per-category browser context. Returns "passed" | "failed" for the
 // scheduler's dependency tracking. Tests inject a lightweight stand-in instead.
-async function defaultRunTest({ id, environmentId, signal, onEvent, source, maxRetries }) {
+async function defaultRunTest({ id, environmentId, signal, onEvent, source, maxRetries, engine }) {
   const { result } = await executeTestRun({
     testId: id,
     environmentId,
@@ -237,6 +237,7 @@ async function defaultRunTest({ id, environmentId, signal, onEvent, source, maxR
     pooled: true,
     source,
     maxRetries,
+    engine,
   });
   return result?.status === "passed" ? "passed" : "failed";
 }
@@ -346,6 +347,7 @@ export async function runProjectBatch({
   source,
   concurrency = config.runConcurrency,
   maxRetries,
+  engine,
   pause = false,
   callbackUrl,
   buildSummary = false,
@@ -431,6 +433,7 @@ export async function runProjectBatch({
           onEvent: (event) => emitRun(test._id, event),
           source,
           maxRetries,
+          engine,
         });
 
       const { ranIds, completedIds } = await scheduleQueue({

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { chromium, devices } from "playwright";
+import { devices } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
@@ -13,6 +13,7 @@ import {
 } from "./artifact-service.js";
 import { decideAction } from "./ollama.js";
 import { resolveFixture } from "./fixture-service.js";
+import { launchBrowser } from "./browser-engines.js";
 
 const MAX_STEPS = 32;
 
@@ -28,18 +29,33 @@ function pageFingerprint(obs) {
 // Emulate a device form-factor while staying on Chromium. We borrow Playwright's
 // device descriptors (viewport, userAgent, deviceScaleFactor, isMobile, touch) —
 // isMobile/touch are Chromium-only, which is exactly the browser we use.
-export function viewportContextOptions(viewport) {
+export function viewportContextOptions(viewport, engine = "chromium") {
+  let opts;
   if (viewport === "mobile") {
     const d = devices["Pixel 7"] || devices["Pixel 5"];
-    return d ? { ...d } : { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true };
-  }
-  if (viewport === "tablet") {
+    opts = d ? { ...d } : { viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true };
+  } else if (viewport === "tablet") {
     const d = devices["iPad (gen 7)"] || devices["iPad Mini"];
-    return d
-      ? { ...d }
-      : { viewport: { width: 810, height: 1080 }, isMobile: true, hasTouch: true };
+    opts = d ? { ...d } : { viewport: { width: 810, height: 1080 }, isMobile: true, hasTouch: true };
+  } else {
+    return { viewport: { width: 1280, height: 720 } };
   }
-  return { viewport: { width: 1280, height: 720 } };
+  // Firefox can't emulate mobile: it accepts neither isMobile nor touch. Strip
+  // them so the context is still created with the right VIEWPORT SIZE (which
+  // catches most mobile-layout bugs) but without the unsupported input flags.
+  // The caller surfaces this degradation in the run history (see runTest).
+  if (engine === "firefox") {
+    const { isMobile, hasTouch, ...rest } = opts;
+    return rest;
+  }
+  return opts;
+}
+
+// True when a mobile/tablet viewport on this engine gives only viewport size,
+// not touch/mobile input emulation — currently Firefox. Used to note the
+// degradation in the run record so it's visible per run, not just in docs.
+export function isDegradedMobile(viewport, engine) {
+  return engine === "firefox" && (viewport === "mobile" || viewport === "tablet");
 }
 
 // Video size must match the emulated viewport, else Playwright letterboxes it.
@@ -1077,6 +1093,9 @@ export async function runTest({
   runId = "run",
   attempt = 1,
   model,
+  // Browser engine for a standalone (non-pooled) run: "chromium" | "firefox" |
+  // "webkit". Already resolved by the caller (run override -> test -> chromium).
+  engine = "chromium",
   // When provided, reuse this LIVE context (shared across a category) instead of
   // launching a fresh browser — the page is authenticated already. The context
   // is NOT closed here; the pool owns its lifecycle.
@@ -1431,7 +1450,12 @@ export async function runTest({
         context.on("page", onPopup);
         await context.tracing.startChunk({ title: test.code || "run" }).catch(() => {});
         if (test.viewport && test.viewport !== "desktop") {
-          history.push(`Emulating a ${test.viewport} viewport.`);
+          history.push(
+            `Emulating a ${test.viewport} viewport on ${engine}.` +
+              (isDegradedMobile(test.viewport, engine)
+                ? " NOTE: Firefox can't emulate touch — this uses the mobile viewport size only, not touch input."
+                : ""),
+          );
         }
       } catch {
         // Pooled context unusable — fall back to a standalone browser below.
@@ -1442,8 +1466,8 @@ export async function runTest({
       }
     }
     if (!pooled) {
-      browser = await chromium.launch({ headless: config.playwrightHeadless });
-      const deviceOpts = viewportContextOptions(test.viewport);
+      browser = await launchBrowser(engine);
+      const deviceOpts = viewportContextOptions(test.viewport, engine);
       context = await browser.newContext({
         ...deviceOpts,
         recordVideo: { dir: artifactScope.dir, size: videoSizeFor(deviceOpts) },
@@ -1982,9 +2006,11 @@ export async function explorePage({
   let page;
   const notes = [];
   try {
-    browser = await chromium.launch({ headless: config.playwrightHeadless });
+    // Exploration always runs on chromium (the default, always-installed engine);
+    // it maps app structure and isn't engine-fidelity-sensitive.
+    browser = await launchBrowser("chromium");
     context = await browser.newContext({
-      ...viewportContextOptions("desktop"),
+      ...viewportContextOptions("desktop", "chromium"),
       ...(storageStateLoad ? { storageState: storageStateLoad } : {}),
     });
     page = await context.newPage();
